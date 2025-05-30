@@ -182,7 +182,7 @@ def ramp_up_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Constraint:
     """
     system = m.system
     comp = system.comp_map[cname]
-    if not hasattr(comp, "ramp_limit") or comp.ramp_limit >= 1.0 or t == m.T.first():
+    if not hasattr(comp, "ramp_limit") or t == m.T.first():
         return pyo.Constraint.Skip
     res = comp.capacity_resource.name
     return (
@@ -211,7 +211,7 @@ def ramp_down_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Constraint:
     """
     system = m.system
     comp = system.comp_map[cname]
-    if not hasattr(comp, "ramp_limit") or comp.ramp_limit >= 1.0 or t == m.T.first():
+    if not hasattr(comp, "ramp_limit") or t == m.T.first():
         return pyo.Constraint.Skip
     res = comp.capacity_resource.name
     return (
@@ -373,15 +373,12 @@ def steady_state_upper_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Con
     """
     system = m.system
     comp = system.comp_map[cname]
-    if t == m.T.first():
+    if not hasattr(comp, "ramp_freq") or comp.ramp_freq == 0 or t == m.T.first():
         return pyo.Constraint.Skip
-
-    res = comp.capacity_resource.name
-    flow_diff = m.flow[cname, res, t] - m.flow[cname, res, m.T.prev(t)]
 
     # If steady_bin is 1, then flow difference must be <= 0
     M = 2 * comp.max_capacity
-    return flow_diff <= M * (1 - m.steady_bin[cname, t])
+    return m.ramp_up[cname, t] <= M * (1 - m.steady_bin[cname, t])
 
 
 def steady_state_lower_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Constraint:
@@ -404,15 +401,12 @@ def steady_state_lower_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Con
     """
     system = m.system
     comp = system.comp_map[cname]
-    if t == m.T.first():
+    if not hasattr(comp, "ramp_freq") or comp.ramp_freq == 0 or t == m.T.first():
         return pyo.Constraint.Skip
-
-    res = comp.capacity_resource.name
-    flow_diff = m.flow[cname, res, t] - m.flow[cname, res, m.T.prev(t)]
 
     # If steady_bin is 1, then flow difference must be >= 0
     M = 2 * comp.max_capacity
-    return flow_diff >= -M * (1 - m.steady_bin[cname, t])
+    return m.ramp_down[cname, t] >= -M * (1 - m.steady_bin[cname, t])
 
 
 def state_selection_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Constraint:
@@ -433,6 +427,12 @@ def state_selection_rule(m: pyo.ConcreteModel, cname: str, t: int) -> pyo.Constr
     pyo.Constraint
         Component must be in exactly one state (up, down, or steady)
     """
+    # If no components spcecify a non-default ramp_freq, then skip
+    system = m.system
+    comp = system.comp_map[cname]
+    if not hasattr(comp, "ramp_freq") or comp.ramp_freq == 0:
+        return pyo.Constraint.Skip
+
     return m.ramp_up_bin[cname, t] + m.ramp_down_bin[cname, t] + m.steady_bin[cname, t] == 1
 
 
@@ -459,13 +459,13 @@ def balance_rule(m: pyo.ConcreteModel, rname: str, t: int) -> pyo.Expression:
         A Pyomo expression representing the balance constraint for the resource.
         The constraint ensures that production + storage discharge equals consumption + storage charge.
     """
-    prod = sum(
+    production = sum(
         m.flow[cname, rname, t]
         for cname in m.NON_STORAGE
         if rname in m.system.comp_map[cname].produces_by_name
     )
 
-    cons = sum(
+    consumption = sum(
         m.flow[cname, rname, t]
         for cname in m.NON_STORAGE
         if rname in m.system.comp_map[cname].consumes_by_name
@@ -476,7 +476,7 @@ def balance_rule(m: pyo.ConcreteModel, rname: str, t: int) -> pyo.Expression:
         for s in m.STORAGE
         if m.system.comp_map[s].resource.name == rname
     )
-    return prod - cons + storage_change == 0
+    return production - consumption + storage_change == 0
 
 
 def storage_balance_rule(m: pyo.ConcreteModel, sname: str, t: int) -> pyo.Expression:
@@ -510,8 +510,8 @@ def storage_balance_rule(m: pyo.ConcreteModel, sname: str, t: int) -> pyo.Expres
     if t == m.T.first():
         soc_prev = comp.initial_stored * comp.max_capacity
     else:
-        soc_prev = m.SOC[sname, m.T.prev(t)]
-    return m.SOC[sname, t] == soc_prev + (
+        soc_prev = m.soc[sname, m.T.prev(t)]
+    return m.soc[sname, t] == soc_prev + (
         m.charge[sname, t] * comp.rte**0.5 - m.discharge[sname, t] / comp.rte**0.5
     )
 
@@ -586,7 +586,7 @@ def soc_limit_rule(m: pyo.ConcreteModel, sname: str, t: int) -> pyo.Expression:
         A Pyomo expression that limits SOC to the storage component's maximum capacity
     """
     comp: Storage = m.system.comp_map[sname]
-    return m.SOC[sname, t] <= comp.max_capacity
+    return m.soc[sname, t] <= comp.max_capacity
 
 
 def objective_rule(m: pyo.ConcreteModel) -> pyo.Expression:
