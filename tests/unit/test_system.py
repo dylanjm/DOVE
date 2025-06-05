@@ -47,6 +47,8 @@ def test_adding_duplicate_component_name_raises():
     sys.add_component(c1)
     with pytest.raises(ValueError):
         sys.add_component(c2)
+    assert sys.components == [c1]
+    assert sys.comp_map["c"] is c1
 
 
 # def test_remove_component_and_resource_cleanup():
