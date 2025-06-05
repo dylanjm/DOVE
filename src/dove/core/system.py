@@ -163,7 +163,11 @@ class System:
             If the component validation fails (via verify method).
         """
         self.components.append(comp)
-        self.verify()
+        try:
+            self.verify()
+        except Exception:
+            self.components.pop()
+            raise
         self.comp_map[comp.name] = comp
         return self
 
