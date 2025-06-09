@@ -45,6 +45,8 @@ napoleon_numpy_docstring = True
 always_document_param_types = True
 autodoc_member_order = "bysource"
 
+myst_enable_extensions = ["dollarmath", "amsmath"]
+
 
 templates_path = ["_templates"]
 
